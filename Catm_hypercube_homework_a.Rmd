@@ -1,0 +1,247 @@
+---
+title: "Sensitivity Analysis Latin Hypercube"
+author: "Jared and Ata"
+output:
+  slidy_presentation:
+    highlight: pygments
+  html_document: default
+  pdf_document: default
+  ioslides_presentation:
+    highlight: pygments
+  beamer_presentation:
+    highlight: pygments
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+library(sensitivity)
+library(tidyverse)
+library(lhs)
+library(purrr)
+library(gt)
+```
+
+# Assignment
+
+With a new group: Sensitivity Analysis
+
+Often when we are estimating vegetation or crop water use we need to know the atmospheric conductance - which is essentially how easily water diffuses into the air and depends largely on windspeed (you get more evaporation in windier conditions) Atmospheric conductance is also influenced by the vegetation itself and the turbulence it creates
+
+I've provided a function to compute atmospheric conductance $C_{at}$ (how easily vapor diffuses from vegetation surfaces)
+
+**The function *Catm.R* is provided**
+
+So that you know what it does - here's some background on the function $$
+C_{at} = \frac{v_m}{6.25*{ln(\frac{z_m-z_d}{z_0})}^2}
+$$ $$
+z_d = k_d*h
+$$ $$
+z_0 = k_0*h
+$$
+
+$z_m$ is the height at which windspeed is measured - must be higher than the vegetation (cm), it is usually measured 200 cm above the vegetation
+
+$h$ is vegetation height (cm)
+
+$v$ is windspeed (cm/s)
+
+Typical values if $k_d$ and $k_o$ are 0.7 and 0.1 respectively (so use those as defaults)
+
+**Your task**
+
+For a given forest, you will perform a sensitivity analysis of model predictions of conductance Consider the sensitivity of your estimate to uncertainty in the following parameters and inputs
+
+-   $height$
+
+-   $k_d$
+
+-   $k_0$
+
+-   $v$
+
+Windspeeds $v$ are normally distributed with a mean of 250 cm/s with a standard deviation of 30 cm/s
+
+For vegetation height assume that height is somewhere between 9.5 and 10.5 m (but any value in that range is equally likely)
+
+For the $k_d$ and $k_0$ parameters you can assume that they are normally distributed with standard deviation of 1% of their default values
+
+
+a)  Use the Latin hypercube approach to generate parameter values for the 4 parameters
+
+```{r}
+
+source("D:/UCSB/EDS_ 230/atmospheric_conductance_model/r/Catm.R")
+
+# Define parameters names
+pnames = c("height", "k_d", "k_o", "v")
+
+#number of parameters
+npar = length(pnames)
+
+#number of samples
+nsample = 100
+
+parm_quant = randomLHS(nsample, npar)
+colnames(parm_quant) = pnames
+
+
+#create an empty matrix
+parm = as.data.frame(matrix(nrow = nrow(parm_quant), 
+                            ncol = ncol(parm_quant)))
+colnames(parm) = pnames
+
+#setup pvar to 1%
+pvar = 0.01
+
+
+parm[, "height"] = qnorm(parm_quant[,"height"], mean = 9.5, sd= 10.5)
+parm[,"k_d"] = qnorm(parm_quant[,"k_d"], mean=0.7, sd=0.7)
+parm[,"k_o"] = qunif(parm_quant[,"k_o"], min=0.1,max=0.1)
+parm[, "v"] = qnorm(parm_quant[,"v"], mean = 250, sd= 30)
+
+parm_df <- data.frame(parm)
+
+summary(parm_df)
+
+```
+b)  Run the atmospheric conductance model for these parameters
+
+```{r}
+# Run the model for the differents parameters 
+atmospheric <- pmap( parm_df,Catm)
+
+#check the results, is a list
+
+head(atmospheric)
+
+
+```
+```{r}
+#Change to a dataframe
+
+atmospheric_df <- data.frame(Ca = unlist(atmospheric))
+
+head(atmospheric_df)
+```
+
+
+c)  Plot conductance estimates in a way that accounts for parameter uncertainty
+```{r}
+
+atmospheric_all <- cbind(atmospheric_df, parm_df)
+
+
+tmp = atmospheric_all%>% gather(value = "value", key = "Ca")
+
+
+ggplot(tmp, aes(Ca, value, fill = Ca)) +
+  geom_boxplot(alpha = 0.5) + 
+  labs(y = "Values",
+       x = "Paremeters") +
+  facet_wrap(~ Ca, scales= "free")
+
+```
+
+
+d)  Plot conductance estimates against each of your parameters
+
+```{r}
+
+# pivot longer for all atmospheric parameters
+tmp1 = atmospheric_all |>gather(Ca, value= "atm_value", key= "atm_con")
+
+tmp2 = tmp1 |> gather(-atm_value, -atm_con, key= "parm", value = "parm_value")
+
+
+# Create the plot 
+ggplot(tmp2, aes(parm_value, atm_value, color = parm)) + 
+  geom_point() + 
+  facet_wrap(~parm, scales = "free") +
+  theme_bw() +
+  theme(
+    axis.line = element_line(),
+    panel.grid.major = element_line(colour = "gray", linetype = "dashed"),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.text = element_text(size = 11),
+    axis.title = element_text(size = 14),
+    legend.title = element_text(size = 11),
+    legend.text = element_text(size = 11),
+    legend.position = "right",
+    panel.spacing = unit(1, "lines")
+  ) +
+  labs(
+    x = "Parameter Value",
+    y = "Atmospheric Conductance",
+    title = "Atmospheric Conductance and Environmental Parameters"
+  )
+
+```
+
+e)  Estimate the Partial Rank Correlation Coefficients
+```{r}
+
+senresult_rank = pcc(parm_df, atmospheric_df, rank = TRUE)
+results <- as.data.frame(senresult_rank$PRCC)
+
+# extract the values from the  result
+
+height <- results$original[1]
+k_d <- results$original[2]
+k_o <- results$original[3]
+v <- results$original[4]
+
+# create the data frame
+result_df <- data.frame(parameter = c( "height", "k_d", "k_o","v"),
+                 importance = c( height, k_d, k_o, v))
+
+
+# Create the ggplot object
+ggplot(result_df, aes(x = parameter, y = importance, fill = parameter)) +
+  geom_bar(stat = "identity", alpha = 0.8, color = "black", size = 0.5) +
+  scale_fill_brewer(palette = "Set1") +
+  labs(title = "Relative Importance of Model Parameters",
+       x = "Parameter",
+       y = "Importance",
+       fill = "Parameter") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12),
+        legend.title = element_text(size = 14),
+        legend.text = element_text(size = 12),
+        legend.position = "bottom",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank())
+
+
+
+
+```
+
+
+
+f)  Discuss what your results tell you about how aerodynamic conductance? What does it suggest about what you should focus on if you want to reduce uncertainty in aerodymaic conductance estimates? Does this tell you anything about the sensitivity of plant water use to climate change?
+
+Response: The sensitivity analysis revealed that aerodynamic conductance is more sensitive to changes in wind speed than to changes in vegetation height. Therefore, to reduce uncertainty in estimates of aerodynamic conductance, efforts should focus on improving the accuracy of wind speed measurements.
+Our results suggest that as wind speed increases, plants consume more water. This underscores the importance of considering the potential impacts of climate change on plant water use when predicting future water availability and ecosystems dynamics.
+
+Submit the Rmarkdown (or link to git repo) as usual
+
+**Grading Rubric**
+
+-   Generation of parameter values using latin hypercube sampling (10pts)
+-   Running model for the parameters (10pts)
+-   Graph of conductance uncertainty
+    -   meaningful graph (5pts)
+    -   graphing style (axis labels, legibility) (5 pts)
+-   Graph of conductance against parameter values
+    -   meaningful graph (5pts)
+    -   graphing style (axis labels, legibility) (5 pts)
+-   Correct Rank Correlation Coefficients (10 pts)
+-   Discussion (10pts)
+    -   suggestion for how to reduce uncertainty that follows from your analysis (5pts)
+    -   idea about how uncertainty might impact estimate of plant water use under climate change (5pts)
