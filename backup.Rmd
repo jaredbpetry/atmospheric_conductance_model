@@ -1,0 +1,196 @@
+---
+title: "Sensitivity Analysis Latin Hypercube"
+author: "Jared and Ata"
+output:
+  slidy_presentation:
+    highlight: pygments
+  html_document: default
+  pdf_document: default
+  ioslides_presentation:
+    highlight: pygments
+  beamer_presentation:
+    highlight: pygments
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+library(sensitivity)
+library(tidyverse)
+library(lhs)
+library(purrr)
+```
+
+
+# Assignment 
+
+With a new group: Sensitivity Analysis
+
+Often when we are estimating vegetation or crop water use we need to know the atmospheric conductance - which is essentially how easily water diffuses into the air and depends largely on windspeed (you get more evaporation in windier conditions) Atmospheric conductance is also influenced by the vegetation itself and the turbulence it creates
+
+I've provided a function to compute atmospheric conductance $C_{at}$ (how easily vapor diffuses from vegetation surfaces)
+
+**The function *Catm.R* is provided**
+
+
+So that you know what it does - here's some background on the function
+$$
+C_{at} = \frac{v_m}{6.25*{ln(\frac{z_m-z_d}{z_0})}^2}
+$$
+$$
+z_d = k_d*h
+$$
+$$
+z_0 = k_0*h
+$$
+
+
+$z_m$ is the height at which windspeed is measured - must be higher than the vegetation (cm), it is usually measured 200 cm  above the vegetation
+
+$h$ is vegetation height (cm)
+
+$v$ is windspeed (cm/s)
+
+Typical values if $k_d$ and $k_o$ are 0.7 and 0.1 respectively (so use those as defaults)
+
+**Your task**
+
+For a given forest, you will perform a sensitivity analysis of model predictions of conductance
+Consider the sensitivity of your estimate to uncertainty in the following parameters and inputs
+  
+  * $height$ 
+  
+  * $k_d$
+  
+  * $k_0$
+  
+  * $v$
+  
+Windspeeds $v$ are normally distributed with a mean of  250 cm/s with a standard deviation of 30 cm/s
+
+For vegetation height assume that height is somewhere between 9.5 and 10.5 m (but any value in that range is equally likely)
+
+For the $k_d$ and $k_0$ parameters you can assume that they are normally distributed with standard deviation of 1% of their default values
+
+a) Use the Latin hypercube approach to generate parameter values for the 4 parameters
+
+```{r}
+# set seed for reproducibility
+set.seed(050723)
+
+# which parameters we are using
+pnames <- c("height", "k_d", "k_o", "v") 
+
+# number of parameters
+npar <- length(pnames) 
+
+# number of samples
+nsample = 100 
+
+parm_quant = randomLHS(nsample, npar) 
+colnames(parm_quant) = pnames
+# we now have a matrix of parameter values with column names
+
+parm <- as.data.frame(matrix(nrow = nrow(parm_quant),
+                             ncol = ncol(parm_quant)))
+colnames(parm) = pnames
+# now it's in the dataframe form, but with na values we will fill with our distribution
+
+# height parameter has a uniform distribution from 9.5 to 10.5 meters
+# use +-10% ? we won't do this for now I think that was just for the class example 
+parm[,"height"] = qunif(parm_quant[,"height"],
+                        min = 9.5, 
+                        max = 10.5)
+
+# Windspeeds 'v' are normally distributed with a mean of 250 cm/s with a standard deviation of 30 cm/s
+parm[,"v"] = qnorm(parm_quant[,"v"],
+                   mean = 250,
+                   sd = 30) 
+
+# k_d parameter has a mean of 0.7 and standard deviation is 1% of that default value
+parm[,"k_d"] = qnorm(parm_quant[,"k_d"],
+                     mean = 0.7,
+                     sd = 0.7*0.01)
+
+# k_0 parameter has a mean of 0.1 and standard deviation is 1% of that default value
+parm[,"k_o"] = qnorm(parm_quant[,"k_o"], 
+                     mean = 0.1, 
+                     sd = 0.1*0.01)
+
+# see if it looks right 
+head(parm) # looks good!
+```
+
+b) Run the atmospheric conductance model for these parameters 
+
+```{r}
+# source the function 
+source("Catm.R")
+
+# run our model map the function onto the parameter space with pmap()
+c_atm <- parm |> pmap(Catm)
+
+# see what is returned 
+head(c_atm)
+
+# establish a results dataframe by adding the c_atm output as a column
+results <- parm
+results$catm <- c_atm
+
+
+```
+
+c) Plot conductance estimates in a way that accounts for parameter uncertainty
+
+```{r}
+# add uncertainty bounds on our estimates
+tmp = results %>% gather(value="value", key="catm")
+ggplot(tmp, aes(catm, value, col=catm))+geom_boxplot()+
+  labs(y="Atmospheric Conductance")
+
+# note that you don't see the ranges because of the scale (min yield anomoly much smaller than max) - here's a more informative way to graph
+ggplot(tmp, aes(catm, value, col=catm))+
+  geom_boxplot()+labs(y="Atmospheric Conductance")+
+  facet_wrap(~catm, scales="free" )
+
+
+# cumulative distribution
+results$catm <- unlist(results$catm)
+ggplot(results, aes(catm)) + stat_ecdf()
+
+
+# plot parameter sensitivity
+# a bit tricky but nice way to make it easy to plot all parameters against all values
+
+gathered_df = results %>% gather(height, k_d, k_o, v, key="parm", value="parmvalue")
+ggplot(gathered_df, aes(parmvalue, catm))+geom_point()+facet_wrap(~parm, scales="free", ncol=5)
+
+```
+
+d) Plot conductance estimates against each of your parameters
+
+**not sure maybe I already did this part... I made all the graphs**
+
+e) Estimate the Partial Rank Correlation Coefficients
+
+
+f) Discuss what your results tell you about how aerodynamic conductance? What does it suggest about what you should focus on if you want to reduce uncertainty in aerodymaic conductance estimates? Does this tell you anything about the sensitivity of plant water use to climate change? 
+
+Submit the Rmarkdown (or link to git repo) as usual
+
+**Grading Rubric**
+
+* Generation of parameter values using latin hypercube sampling (10pts)
+* Running model for the parameters (10pts)
+* Graph of conductance uncertainty 
+  * meaningful graph (5pts)
+  * graphing style (axis labels, legibility) (5 pts)
+* Graph of conductance against parameter values 
+  * meaningful graph (5pts)
+  * graphing style (axis labels, legibility) (5 pts)
+* Correct Rank Correlation Coefficients (10 pts)
+* Discussion (10pts)
+  * suggestion for how to reduce uncertainty that follows from your analysis (5pts)
+  * idea about how uncertainty might impact estimate of plant water use under climate change (5pts)
+
