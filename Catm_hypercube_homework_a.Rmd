@@ -72,7 +72,7 @@ a)  Use the Latin hypercube approach to generate parameter values for the 4 para
 
 ```{r}
 
-source("D:/UCSB/EDS_ 230/atmospheric_conductance_model/r/Catm.R")
+source("D:/UCSB/EDS_ 230/atmospheric_conductance_model/Catm.R")
 
 # Define parameters names
 pnames = c("height", "k_d", "k_o", "v")
@@ -87,20 +87,41 @@ parm_quant = randomLHS(nsample, npar)
 colnames(parm_quant) = pnames
 
 
-#create an empty matrix
+#we now have a matrix of parameter values with column names
 parm = as.data.frame(matrix(nrow = nrow(parm_quant), 
                             ncol = ncol(parm_quant)))
 colnames(parm) = pnames
 
+
+
+# now it's in the dataframe form, but with na values we will fill with our distribution
+
+# height parameter has a uniform distribution from 9.5 to 10.5 meters
 #setup pvar to 1%
 pvar = 0.01
 
 
-parm[, "height"] = qnorm(parm_quant[,"height"], mean = 9.5, sd= 10.5)
-parm[,"k_d"] = qnorm(parm_quant[,"k_d"], mean=0.7, sd=0.7)
-parm[,"k_o"] = qunif(parm_quant[,"k_o"], min=0.1,max=0.1)
-parm[, "v"] = qnorm(parm_quant[,"v"], mean = 250, sd= 30)
+parm[, "height"] = qnorm(parm_quant[,"height"], 
+                         mean = 9.5,
+                         sd= 10.5)
 
+# k_d parameter has a mean of 0.7 and standard deviation is 1% of that default value
+
+parm[,"k_d"] = qnorm(parm_quant[,"k_d"], 
+                     mean=0.7, 
+                     sd=0.01)
+
+# k_0 parameter has a mean of 0.1 and standard deviation is 1% of that default value
+parm[,"k_o"] = qunif(parm_quant[,"k_o"], 
+                     min=0.1,
+                     max=0.1)
+
+# Windspeeds 'v' are normally distributed with a mean of 250 cm/s with a standard deviation of 30 cm/s
+parm[, "v"] = qnorm(parm_quant[,"v"],
+                    mean = 250,
+                    sd= 30)
+
+# see if it looks right 
 parm_df <- data.frame(parm)
 
 summary(parm_df)
@@ -121,36 +142,53 @@ head(atmospheric)
 ```{r}
 #Change to a dataframe
 
-atmospheric_df <- data.frame(Ca = unlist(atmospheric))
+atmospheric_df <- data.frame(catm = unlist(atmospheric))
 
 head(atmospheric_df)
 ```
 
 
 c)  Plot conductance estimates in a way that accounts for parameter uncertainty
-```{r}
 
+```{r}
+# add uncertainty bounds on our estimates
 atmospheric_all <- cbind(atmospheric_df, parm_df)
 
 
-tmp = atmospheric_all%>% gather(value = "value", key = "Ca")
+tmp = atmospheric_all|> gather(value = "value", key = "catm")
+ggplot(tmp, aes(catm, value, col=catm))+geom_boxplot()+
+  labs(y="Atmospheric Conductance")
 
-
-ggplot(tmp, aes(Ca, value, fill = Ca)) +
-  geom_boxplot(alpha = 0.5) + 
-  labs(y = "Values",
+```
+```{r}
+# note that you don't see the ranges because of the scale (min yield anomoly much smaller than max) - here's a more informative way to graph
+ggplot(tmp, aes(catm, value, fill = catm)) +
+  geom_boxplot() + 
+  labs(y = "Atmospheric conductance",
        x = "Paremeters") +
-  facet_wrap(~ Ca, scales= "free")
+  facet_wrap(~ catm, scales= "free")
+```
 
+```{r}
+# cumulative distribution
+atmospheric_all$catm <- unlist(atmospheric_all$catm)
+ggplot(atmospheric_all, aes(catm)) + stat_ecdf()
+
+```
+```{r}
+# plot parameter sensitivity
+# a bit tricky but nice way to make it easy to plot all parameters against all values
+
+gathered_df = atmospheric_all%>% gather(height, k_d, k_o, v, key="parm", value="parmvalue")
+ggplot(gathered_df, aes(parmvalue, catm))+geom_point()+facet_wrap(~parm, scales="free", ncol=5)
 ```
 
 
 d)  Plot conductance estimates against each of your parameters
 
 ```{r}
-
 # pivot longer for all atmospheric parameters
-tmp1 = atmospheric_all |>gather(Ca, value= "atm_value", key= "atm_con")
+tmp1 = atmospheric_all |>gather(catm, value= "atm_value", key= "atm_con")
 
 tmp2 = tmp1 |> gather(-atm_value, -atm_con, key= "parm", value = "parm_value")
 
